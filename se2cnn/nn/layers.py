@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import math as m
 
 
-class R2toSE2Conv(nn.Module):
+class R2ToSE2Conv(nn.Module):
 
     def __init__(self, input_dim, output_dim, num_theta, kernel_size, padding=0, stride=1, bias=True, diskMask=True):
         super().__init__()
@@ -43,7 +43,7 @@ class R2toSE2Conv(nn.Module):
         return x
 
 
-class SE2toSE2Conv(nn.Module):
+class SE2ToSE2Conv(nn.Module):
 
     def __init__(self, input_dim, output_dim, num_theta, kernel_size, padding=0, stride=1, bias=True, diskMask=True):
         super().__init__()
@@ -83,7 +83,7 @@ class SE2toSE2Conv(nn.Module):
         return x
 
 
-class SE2toR2Conv(nn.Module):
+class SE2ToR2Conv(nn.Module):
 
     def __init__(self, input_dim, output_dim, num_theta, kernel_size, padding=0, stride=1, bias=True, diskMask=True):
         super().__init__()
@@ -122,7 +122,7 @@ class SE2toR2Conv(nn.Module):
             x = x + self.bias[None, :, None, None]
         return x
 
-class SE2toR2Projection(nn.Module):
+class SE2ToR2Projection(nn.Module):
 
     def __init__(self, method):
         super().__init__()
@@ -138,14 +138,14 @@ class SE2toR2Projection(nn.Module):
             raise Exception("Fiber pooling method not known")
         return x
 
-class Regular2Type1(nn.Module):
+class RegularToType1(nn.Module):
 
     def __init__(self, num_theta):
         super().__init__()
 
         self.num_theta = num_theta
         theta_grid = torch.linspace(0, 2 * m.pi - 2 * m.pi / self.num_theta, num_theta)
-        self.basis = torch.stack((torch.sin(theta_grid),torch.cos(theta_grid)))
+        self.basis = torch.stack((torch.cos(theta_grid),torch.sin(theta_grid)))
 
     def forward(self, x):
         x = torch.einsum('bca...,ia->bci...',x, self.basis)  # [B, C, num_theta, ...] -> [B, C, 2, ...]
@@ -184,8 +184,8 @@ if __name__ == "__main__":
     num_theta = 8
     kernel_size = 7
     x = torch.randn([16, input_dim, 151, 151])
-    layer1 = R2toSE2Conv(input_dim, output_dim, num_theta, kernel_size)
-    layer2 = SE2toSE2Conv(output_dim, output_dim2, num_theta, kernel_size)
+    layer1 = R2ToSE2Conv(input_dim, output_dim, num_theta, kernel_size)
+    layer2 = SE2ToSE2Conv(output_dim, output_dim2, num_theta, kernel_size)
     y = F.relu(layer1(x))
     print(y.shape)
     print(layer2.kernel_stack.shape)
@@ -200,16 +200,16 @@ if __name__ == "__main__":
     print(torch.std(x), torch.std(y), torch.std(z), y.shape, z.shape)
 
     num_theta = 8
-    layer2irrep1 = Regular2Type1(num_theta)
+    layer2irrep1 = RegularToType1(num_theta)
     out = layer2irrep1(z)
     print(z.shape, out.shape)
 
-    proj_layer = SE2toR2Projection("max")
+    proj_layer = SE2ToR2Projection("max")
     out2 = proj_layer(z)
     print(out2.shape)
 
     output_dim3 = 78
-    proj_conv = SE2toR2Conv(output_dim2, output_dim3, num_theta, kernel_size)
+    proj_conv = SE2ToR2Conv(output_dim2, output_dim3, num_theta, kernel_size)
     out3 = proj_conv(z)
     print(out3.shape)
 
