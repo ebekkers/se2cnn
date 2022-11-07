@@ -1,7 +1,7 @@
 import torch
 import torchvision
 
-from se2cnn.nn.layers import R2ToSE2Conv, SE2ToSE2Conv, SE2ToR2Conv, SE2ToR2Projection, RegularToType1
+from se2cnn.nn import R2ToSE2Conv, SE2ToSE2Conv, SE2ToR2Conv, SE2ToR2Projection, RegularToType1
 
 kernel_size = 5
 spatial_dim = (kernel_size - 1) * 3 + 1
