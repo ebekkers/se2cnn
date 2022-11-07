@@ -110,8 +110,10 @@ class SE2toR2Conv(nn.Module):
             self.kernel))  # [num_theta, X * Y])
         # Let's use a for input rotation axis, b for output rotation axis:
         self.kernel_stack = torch.einsum('oiax,byx->obiay', self.kernel.flatten(-2,-1), self.RR).unflatten(-1, [kernel_size, kernel_size])
-        # Symmetrize
-        self.kernel_stack = torch.mean(self.kernel_stack, 1)  # [Cout, Cin, num_theta, x, y]
+        for b in range(num_theta):
+            self.kernel_stack[:, b, ...] = torch.roll(self.kernel_stack[:, b, ...], b, 2)
+        # Symmetrize (mean pool before convolution)
+        self.kernel_stack = torch.mean(self.kernel_stack, (1))  # [Cout, Cin, num_theta x, y]
         self.kernel_stack_conv2d = self.kernel_stack.flatten(1, 2)  # [Cout, Cin * num_theta, x, y]
 
     def forward(self, x):
@@ -210,3 +212,7 @@ if __name__ == "__main__":
     proj_conv = SE2toR2Conv(output_dim2, output_dim3, num_theta, kernel_size)
     out3 = proj_conv(z)
     print(out3.shape)
+
+    for i in range(num_theta):
+        plt.imshow(proj_conv.kernel_stack[0,0,i].detach().numpy())
+        plt.show()
