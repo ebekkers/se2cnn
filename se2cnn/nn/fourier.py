@@ -42,14 +42,14 @@ class Fourier(nn.Module):
     def rotate_signal(self, x, theta):
         x_hat = self.ft(x)
         for l in range(1,self.lmax+1):
-            x_hat[:,:,l] = self.rotate_irrep(x_hat[:,:,l], theta, l)
+            x_hat[:,:,l] = self.rotate_irrep(x_hat[:,:,l].clone(), theta, l)  # clone bc of inplace operation
         x = self.ift(x_hat)
         return x
 
     # SO(2) Rotation matrix of frequency l
     def rotation_matrix(self, theta, l=1):
-        # in shape: [B, theta, ...], out shape: [B, 2, 2, ...]
-        return torch.stack([torch.cos(l * theta), -torch.sin(l * theta), torch.sin(l * theta), torch.cos(l * theta)],
+        # in shape: [B, 1, ...], out shape: [B, 2, 2, ...]
+        return torch.cat([torch.cos(l * theta), -torch.sin(l * theta), torch.sin(l * theta), torch.cos(l * theta)],
                            dim=1).unflatten(1, [2, 2])
 
     # Get only the lth Fourier coefficient
