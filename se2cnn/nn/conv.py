@@ -7,7 +7,7 @@ import math as m
 
 class R2ToSE2Conv(nn.Module):
 
-    def __init__(self, input_dim, output_dim, num_theta, kernel_size, padding=0, stride=1, bias=True, diskMask=True):
+    def __init__(self, input_dim, output_dim, num_theta, kernel_size, padding=0, stride=1, bias=True, diskMask=True, groups=1):
         super().__init__()
 
         self.input_dim = input_dim
@@ -17,10 +17,11 @@ class R2ToSE2Conv(nn.Module):
         self.padding = padding
         self.stride = stride
         self.diskMask = diskMask
+        self.groups = groups
 
         # The layer parameters
-        self.kernel = nn.Parameter(torch.zeros(output_dim, input_dim, kernel_size, kernel_size))
-        self.kernel = nn.init.normal_(self.kernel, 0, 2. / m.sqrt(input_dim * kernel_size * kernel_size))
+        self.kernel = nn.Parameter(torch.zeros(output_dim, int(input_dim / groups), kernel_size, kernel_size))
+        self.kernel = nn.init.normal_(self.kernel, 0, 2. / m.sqrt(input_dim * kernel_size * kernel_size / groups))
         if bias:
             self.bias = nn.Parameter(torch.zeros(output_dim))
         else:
@@ -30,13 +31,16 @@ class R2ToSE2Conv(nn.Module):
         self.register_buffer('RR', torch.from_numpy(
             MultiRotationOperatorMatrix(kernel_size, kernel_size, num_theta, diskMask=diskMask)).type_as(
             self.kernel))  # [num_theta, X * Y])
-        self.kernel_stack = torch.einsum('oix,tyx->otiy', self.kernel.flatten(-2,-1), self.RR).unflatten(-1, [kernel_size, kernel_size])
-        self.kernel_stack_conv2d = self.kernel_stack.flatten(0, 1)  # [Cout*num_theta, Cin, x, y]
 
-
+    def kernel_stack_conv2d(self):
+        kernel_stack = torch.einsum('oix,tyx->otiy', self.kernel.flatten(-2, -1), self.RR).unflatten(-1,
+                                                                                                     [self.kernel_size,
+                                                                                                      self.kernel_size])
+        kernel_stack_conv2d = kernel_stack.flatten(0, 1)  # [Cout*num_theta, Cin, x, y]
+        return kernel_stack_conv2d
 
     def forward(self, x):
-        x = F.conv2d(x, self.kernel_stack_conv2d, None, self.stride, self.padding)  # [B, Cout*num_theta, X, Y]
+        x = F.conv2d(x, self.kernel_stack_conv2d(), None, self.stride, self.padding, groups=self.groups)  # [B, Cout*num_theta, X, Y]
         x = x.unflatten(1, [self.output_dim, self.num_theta])  # [ B, Cout, num_theta, X, Y]
         if self.bias is not None:
             x = x + self.bias[None,:,None, None,None]
@@ -45,7 +49,7 @@ class R2ToSE2Conv(nn.Module):
 
 class SE2ToSE2Conv(nn.Module):
 
-    def __init__(self, input_dim, output_dim, num_theta, kernel_size, padding=0, stride=1, bias=True, diskMask=True):
+    def __init__(self, input_dim, output_dim, num_theta, kernel_size, padding=0, stride=1, bias=True, diskMask=True, groups=1):
         super().__init__()
 
         self.input_dim = input_dim
@@ -55,10 +59,11 @@ class SE2ToSE2Conv(nn.Module):
         self.padding = padding
         self.stride = stride
         self.diskMask = diskMask
+        self.groups = groups
 
         # The layer parameters
-        self.kernel = nn.Parameter(torch.zeros(output_dim, input_dim, num_theta, kernel_size, kernel_size))
-        self.kernel = nn.init.normal_(self.kernel, 0, 2. / m.sqrt(input_dim * num_theta * kernel_size * kernel_size))
+        self.kernel = nn.Parameter(torch.zeros(output_dim, int(input_dim / groups), num_theta, kernel_size, kernel_size))
+        self.kernel = nn.init.normal_(self.kernel, 0, 2. / m.sqrt(input_dim * num_theta * kernel_size * kernel_size / groups))
         if bias:
             self.bias = nn.Parameter(torch.zeros(output_dim))
         else:
@@ -68,15 +73,19 @@ class SE2ToSE2Conv(nn.Module):
         self.register_buffer('RR', torch.from_numpy(
             MultiRotationOperatorMatrix(kernel_size, kernel_size, num_theta, diskMask=diskMask)).type_as(
             self.kernel))  # [num_theta, X * Y])
+
+    def kernel_stack_conv2d(self):
         # Let's use a for input rotation axis, b for output rotation axis:
-        self.kernel_stack = torch.einsum('oiax,byx->obiay', self.kernel.flatten(-2,-1), self.RR).unflatten(-1, [kernel_size, kernel_size])
-        for b in range(num_theta):
-            self.kernel_stack[:, b, ...] = torch.roll(self.kernel_stack[:, b, ...], b, 2)
-        self.kernel_stack_conv2d = self.kernel_stack.flatten(0, 1)  # [Cout*num_theta, Cin, num_theta, x, y]
-        self.kernel_stack_conv2d = self.kernel_stack_conv2d.flatten(1, 2)  # [Cout*num_theta, Cin*num_theta, x, y]
+        kernel_stack = torch.einsum('oiax,byx->obiay', self.kernel.flatten(-2, -1), self.RR).unflatten(-1, [
+            self.kernel_size, self.kernel_size])
+        for b in range(self.num_theta):
+            kernel_stack[:, b, ...] = torch.roll(kernel_stack[:, b, ...], b, 2)
+        kernel_stack_conv2d = kernel_stack.flatten(0, 1)  # [Cout*num_theta, Cin, num_theta, x, y]
+        kernel_stack_conv2d = kernel_stack_conv2d.flatten(1, 2)  # [Cout*num_theta, Cin*num_theta, x, y]
+        return kernel_stack_conv2d
 
     def forward(self, x):
-        x = F.conv2d(x.flatten(1, 2), self.kernel_stack_conv2d, None, self.stride, self.padding)  # [B, Cout*num_theta, X, Y]
+        x = F.conv2d(x.flatten(1, 2), self.kernel_stack_conv2d(), None, self.stride, self.padding, groups=self.groups)  # [B, Cout*num_theta, X, Y]
         x = x.unflatten(1, [self.output_dim, self.num_theta])  # [ B, Cout, num_theta, X, Y]
         if self.bias is not None:
             x = x + self.bias[None,:,None, None,None]
@@ -108,16 +117,20 @@ class SE2ToR2Conv(nn.Module):
         self.register_buffer('RR', torch.from_numpy(
             MultiRotationOperatorMatrix(kernel_size, kernel_size, num_theta, diskMask=diskMask)).type_as(
             self.kernel))  # [num_theta, X * Y])
+
+    def kernel_stack_conv2d(self):
         # Let's use a for input rotation axis, b for output rotation axis:
-        self.kernel_stack = torch.einsum('oiax,byx->obiay', self.kernel.flatten(-2,-1), self.RR).unflatten(-1, [kernel_size, kernel_size])
-        for b in range(num_theta):
-            self.kernel_stack[:, b, ...] = torch.roll(self.kernel_stack[:, b, ...], b, 2)
+        kernel_stack = torch.einsum('oiax,byx->obiay', self.kernel.flatten(-2, -1), self.RR).unflatten(-1, [
+            self.kernel_size, self.kernel_size])
+        for b in range(self.num_theta):
+            kernel_stack[:, b, ...] = torch.roll(kernel_stack[:, b, ...], b, 2)
         # Symmetrize (mean pool before convolution)
-        self.kernel_stack = torch.mean(self.kernel_stack, (1))  # [Cout, Cin, num_theta x, y]
-        self.kernel_stack_conv2d = self.kernel_stack.flatten(1, 2)  # [Cout, Cin * num_theta, x, y]
+        kernel_stack = torch.mean(kernel_stack, (1))  # [Cout, Cin, num_theta x, y]
+        kernel_stack_conv2d = kernel_stack.flatten(1, 2)  # [Cout, Cin * num_theta, x, y]
+        return kernel_stack_conv2d
 
     def forward(self, x):
-        x = F.conv2d(x.flatten(1, 2), self.kernel_stack_conv2d, None, self.stride, self.padding)  # [B, Cout, X, Y]
+        x = F.conv2d(x.flatten(1, 2), self.kernel_stack_conv2d(), None, self.stride, self.padding)  # [B, Cout, X, Y]
         if self.bias is not None:
             x = x + self.bias[None, :, None, None]
         return x
@@ -138,18 +151,6 @@ class SE2ToR2Projection(nn.Module):
             raise Exception("Fiber pooling method not known")
         return x
 
-class RegularToType1(nn.Module):
-
-    def __init__(self, num_theta):
-        super().__init__()
-
-        self.num_theta = num_theta
-        theta_grid = torch.linspace(0, 2 * m.pi - 2 * m.pi / self.num_theta, num_theta)
-        self.basis = torch.stack((torch.cos(theta_grid),torch.sin(theta_grid)))
-
-    def forward(self, x):
-        x = torch.einsum('bca...,ia->bci...',x, self.basis)  # [B, C, num_theta, ...] -> [B, C, 2, ...]
-        return x
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
